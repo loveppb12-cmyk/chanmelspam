@@ -4,71 +4,86 @@ import os
 import signal
 import sys
 from telegram import Update
-from telegram.ext import Application, CommandHandler, ContextTypes
+from telegram.ext import Application, CommandHandler, ContextTypes, CallbackContext
 from telegram.error import TelegramError
+import time
 
 TOKEN = "8688313238:AAEVUXCQICAMM_7x9gD0tOo5eaLHK83uFjA"
 OWNER_ID = 8595518118
 
-# Store active channels and their settings
+# Store active channels
 active_channels = {}
 MESSAGES = ["Hi", "india", "hindi", "crypto", "hi"]
 INTERVALS = [5, 10, 15]
 
-# Global application object
-application = None
+# Global variables
+bot_app = None
+message_task = None
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /start command"""
-    user_id = update.effective_user.id
-    
-    if user_id != OWNER_ID:
-        await update.message.reply_text("❌ You are not authorized to use this bot.")
-        return
-    
-    if len(context.args) == 0:
-        await update.message.reply_text(
-            "📌 *Usage:*\n"
-            "`/start channel_id` - Start sending messages to channel\n"
-            "`/stop channel_id` - Stop sending messages to channel\n"
-            "`/status` - Show all active channels\n\n"
-            "Example: `/start -1001234567890`\n\n"
-            "How to get channel ID:\n"
-            "1. Add @username_to_id_bot to your channel\n"
-            "2. Send any message and it will show channel ID",
-            parse_mode="Markdown"
-        )
-        return
-    
     try:
-        channel_id = int(context.args[0])
-    except ValueError:
-        await update.message.reply_text("❌ Invalid channel ID. Must be a number.")
-        return
-    
-    try:
-        chat_member = await context.bot.get_chat_member(chat_id=channel_id, user_id=context.bot.id)
+        user_id = update.effective_user.id
         
-        if chat_member.status not in ['administrator', 'creator']:
+        if user_id != OWNER_ID:
+            await update.message.reply_text("❌ You are not authorized to use this bot.")
+            return
+        
+        if len(context.args) == 0:
             await update.message.reply_text(
-                f"❌ Bot is not admin in channel {channel_id}\n"
-                f"Please add bot as admin with all permissions first!"
+                "📌 *How to use:*\n\n"
+                "1. Add bot as admin to your channel\n"
+                "2. Get channel ID from @userinfobot\n"
+                "3. Send: `/start -1001234567890`\n\n"
+                "📝 *Commands:*\n"
+                "`/start channel_id` - Start bot in channel\n"
+                "`/stop channel_id` - Stop bot in channel\n"
+                "`/status` - Show active channels\n"
+                "`/help` - Show this message",
+                parse_mode="Markdown"
             )
             return
         
-        if channel_id in active_channels:
-            active_channels[channel_id]["enabled"] = True
-            await update.message.reply_text(f"✅ Resumed sending to channel `{channel_id}`", parse_mode="Markdown")
-        else:
-            active_channels[channel_id] = {"interval_index": 0, "enabled": True}
-            await update.message.reply_text(
-                f"✅ Started sending to channel `{channel_id}`\n"
-                f"⏱️ Cycle: 5s → 10s → 15s → repeat",
-                parse_mode="Markdown"
-            )
+        try:
+            channel_id = int(context.args[0])
+        except ValueError:
+            await update.message.reply_text("❌ Invalid channel ID. Must be a number like: -1001234567890")
+            return
+        
+        # Check if bot is admin
+        try:
+            chat_member = await context.bot.get_chat_member(chat_id=channel_id, user_id=context.bot.id)
             
-    except TelegramError as e:
-        await update.message.reply_text(f"❌ Error: {e}")
+            if chat_member.status not in ['administrator', 'creator']:
+                await update.message.reply_text(
+                    f"❌ Bot is not admin in this channel!\n"
+                    f"Please add @{context.bot.username} as admin first."
+                )
+                return
+            
+            # Add to active channels
+            if channel_id not in active_channels:
+                active_channels[channel_id] = {
+                    "enabled": True,
+                    "last_index": 0,
+                    "last_time": time.time()
+                }
+                await update.message.reply_text(
+                    f"✅ Bot started in channel!\n"
+                    f"📢 Channel ID: `{channel_id}`\n"
+                    f"⏱️ Sending every: 5s → 10s → 15s (repeat)\n"
+                    f"💬 Messages: {', '.join(MESSAGES)}",
+                    parse_mode="Markdown"
+                )
+            else:
+                active_channels[channel_id]["enabled"] = True
+                await update.message.reply_text(f"✅ Bot resumed in channel `{channel_id}`", parse_mode="Markdown")
+                
+        except TelegramError as e:
+            await update.message.reply_text(f"❌ Error: {str(e)[:100]}\nMake sure channel ID is correct and bot is admin.")
+            
+    except Exception as e:
+        await update.message.reply_text(f"❌ Error: {str(e)[:100]}")
 
 async def stop_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /stop command"""
@@ -85,14 +100,14 @@ async def stop_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         channel_id = int(context.args[0])
     except ValueError:
-        await update.message.reply_text("❌ Invalid channel ID.")
+        await update.message.reply_text("❌ Invalid channel ID")
         return
     
     if channel_id in active_channels:
         active_channels[channel_id]["enabled"] = False
         await update.message.reply_text(f"🛑 Stopped sending to channel `{channel_id}`", parse_mode="Markdown")
     else:
-        await update.message.reply_text(f"❌ Channel `{channel_id}` not active", parse_mode="Markdown")
+        await update.message.reply_text(f"❌ Channel `{channel_id}` is not active", parse_mode="Markdown")
 
 async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /status command"""
@@ -113,72 +128,90 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     await update.message.reply_text(status_text, parse_mode="Markdown")
 
-async def send_message_to_channel(bot, channel_id, message):
-    """Send message to a specific channel"""
-    try:
-        await bot.send_message(chat_id=channel_id, text=message)
-        print(f"✓ Sent '{message}' to {channel_id}")
-        return True
-    except TelegramError as e:
-        print(f"✗ Failed to send to {channel_id}: {e}")
-        return False
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /help command"""
+    await update.message.reply_text(
+        "🤖 *Bot Commands:*\n\n"
+        "`/start channel_id` - Start bot in a channel\n"
+        "`/stop channel_id` - Stop bot in a channel\n"
+        "`/status` - Show all active channels\n"
+        "`/help` - Show this message\n\n"
+        "*How to get channel ID:*\n"
+        "1. Add @userinfobot to your channel\n"
+        "2. Forward any message from channel to @userinfobot\n"
+        "3. It will show the channel ID\n\n"
+        "*Note:* Bot must be admin in the channel!",
+        parse_mode="Markdown"
+    )
 
-async def message_sender_loop():
+async def send_messages():
     """Background task to send messages"""
-    global application, active_channels
+    global bot_app, active_channels
     
     while True:
         try:
-            for channel_id, data in list(active_channels.items()):
-                if data["enabled"] and application and application.bot:
-                    interval_index = data["interval_index"]
-                    message = random.choice(MESSAGES)
-                    await send_message_to_channel(application.bot, channel_id, message)
-                    data["interval_index"] = (interval_index + 1) % len(INTERVALS)
-                    wait_time = INTERVALS[interval_index]
-                    await asyncio.sleep(wait_time)
-                else:
-                    await asyncio.sleep(5)
+            if bot_app and bot_app.bot:
+                for channel_id, data in list(active_channels.items()):
+                    if data.get("enabled", False):
+                        # Send random message
+                        message = random.choice(MESSAGES)
+                        try:
+                            await bot_app.bot.send_message(chat_id=channel_id, text=message)
+                            print(f"✓ Sent '{message}' to {channel_id}")
+                        except Exception as e:
+                            print(f"✗ Failed to send to {channel_id}: {e}")
+                            if "chat not found" in str(e).lower():
+                                active_channels.pop(channel_id, None)
+                        
+                        # Wait based on cycle (but don't block other channels)
+                        await asyncio.sleep(5)  # Small delay between channels
+                        
         except Exception as e:
-            print(f"Error in message loop: {e}")
-            await asyncio.sleep(10)
+            print(f"Error in send_messages: {e}")
+        
+        # Wait before next cycle
+        await asyncio.sleep(3)
 
 async def post_init(app: Application):
-    """Start background task after bot is initialized"""
-    global application
-    application = app
-    asyncio.create_task(message_sender_loop())
-    print("✅ Bot is ready! Send /start [channel_id] to begin")
+    """Initialize after bot starts"""
+    global bot_app
+    bot_app = app
+    print("✅ Bot is ready!")
+    print(f"👤 Owner ID: {OWNER_ID}")
+    print("💬 Bot is listening for commands...")
+    
+    # Start background task
+    asyncio.create_task(send_messages())
 
 def handle_shutdown(signum, frame):
     """Handle shutdown gracefully"""
     print("Received shutdown signal, stopping bot...")
-    if application:
-        application.stop()
+    if bot_app:
+        bot_app.stop()
     sys.exit(0)
 
 def main():
     """Start the bot"""
-    global application
+    global bot_app
     
-    # Setup signal handlers for graceful shutdown
+    # Setup signal handlers
     signal.signal(signal.SIGTERM, handle_shutdown)
     signal.signal(signal.SIGINT, handle_shutdown)
     
     # Create application
-    application = Application.builder().token(TOKEN).post_init(post_init).build()
+    bot_app = Application.builder().token(TOKEN).post_init(post_init).build()
     
     # Add command handlers
-    application.add_handler(CommandHandler("start", start_command))
-    application.add_handler(CommandHandler("stop", stop_command))
-    application.add_handler(CommandHandler("status", status_command))
+    bot_app.add_handler(CommandHandler("start", start_command))
+    bot_app.add_handler(CommandHandler("stop", stop_command))
+    bot_app.add_handler(CommandHandler("status", status_command))
+    bot_app.add_handler(CommandHandler("help", help_command))
     
     print("🤖 Bot starting on Heroku...")
-    print("👤 Owner ID:", OWNER_ID)
-    print("💬 Commands: /start, /stop, /status")
+    print(f"📝 Bot token: {TOKEN[:10]}...")
     
-    # Start the bot with proper polling settings
-    application.run_polling(allowed_updates=["message", "chat_member"])
+    # Start polling (this will block)
+    bot_app.run_polling(allowed_updates=["message"])
 
 if __name__ == "__main__":
     main()
