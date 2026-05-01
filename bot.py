@@ -5,7 +5,7 @@ from telegram import Bot, Update
 from telegram.ext import Application, CommandHandler, ContextTypes
 from telegram.error import TelegramError
 
-TOKEN = os.environ.get("8688313238:AAF8-e_9RlUAq9cZy70xkITUCCG6WyqCsTQ", "YOUR_TOKEN_HERE")
+TOKEN = "8688313238:AAF8-e_9RlUAq9cZy70xkITUCCG6WyqCsTQ"
 OWNER_ID = 8595518118  # Your owner ID
 
 # Store active channels and their settings
